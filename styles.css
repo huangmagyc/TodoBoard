@@ -1,0 +1,101 @@
+/* Custom Scrollbar for horizontal board scrolling */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.4); 
+    border-radius: 8px;
+    margin: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.2); 
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(148, 163, 184, 0.4); 
+}
+
+/* Card content vertical scrollbar (slimmer) */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 4px;
+}
+
+/* Base utilities */
+html, body {
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* SortableJS Drag & Drop Visual Settings */
+
+/* 1. Dragging a List (Column) */
+.ghost-list {
+    opacity: 0.3;
+    background-color: rgba(30, 41, 59, 0.6) !important;
+    border: 2px dashed #475569 !important;
+    transform: scale(0.98);
+}
+.drag-list {
+    transform: rotate(2deg);
+    cursor: grabbing !important;
+}
+
+/* 2. Dragging a Card (.md file) */
+.ghost-card {
+    opacity: 0.3;
+    background-color: rgba(30, 41, 59, 0.8) !important;
+    border: 1px dashed #64748b !important;
+}
+.drag-card {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+    transform: rotate(2deg);
+    border: 1px solid #3b82f6 !important;
+    cursor: grabbing !important;
+}
+
+/* 3. Dragging a Group (H2) */
+.ghost-group {
+    opacity: 0.3;
+    border: 1px dashed #475569 !important;
+}
+.drag-group {
+    background: rgba(15, 23, 42, 0.9) !important;
+    border-radius: 8px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* 4. Dragging an Item (Checkbox task) */
+.ghost-item {
+    opacity: 0.2;
+    background: rgba(56, 189, 248, 0.1) !important;
+    border: 1px dashed #0ea5e9 !important;
+}
+.drag-item {
+    background: #1e293b !important;
+    border: 1px solid #3b82f6 !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3) !important;
+    transform: scale(1.02);
+}
+
+/* Micro-animations */
+@keyframes slideDownIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.animate-item-enter {
+    animation: slideDownIn 0.2s ease-out forwards;
+}
+
+/* Checkbox Styling */
+.todo-item[data-checked="true"] span {
+    text-decoration: line-through;
+    color: #64748b; /* slate-500 */
+}

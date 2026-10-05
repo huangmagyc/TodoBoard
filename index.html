@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OneDrive TodoBoard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#151e2e'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+    <!-- MSAL.js for Microsoft Auth -->
+    <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+    <!-- SortableJS for Drag and Drop -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <!-- Flatpickr for Calendar -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://npmcdn.com/flatpickr/dist/themes/dark.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 text-slate-100 h-screen font-sans overflow-hidden selection:bg-blue-500/30">
+    <div id="app" class="flex flex-col h-full bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDIiLz4KPC9zdmc+')]">
+        
+        <!-- Header -->
+        <header class="h-16 bg-slate-900/60 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-6 shrink-0 shadow-lg z-20">
+            <div class="flex items-center gap-4">
+                <div class="w-10 h-10 bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+                    <i class="fa-solid fa-layer-group text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg tracking-wide text-white">Cloud Board</h1>
+                    <p class="text-xs text-slate-400">Powered by OneDrive</p>
+                </div>
+            </div>
+            <div>
+                <!-- Login Button -->
+                <button id="loginBtn" class="bg-white/10 hover:bg-white/20 border border-white/10 text-white px-5 py-2 rounded-lg text-sm font-medium transition-all focus:ring-2 focus:ring-blue-400 focus:outline-none flex items-center gap-2 group">
+                    <i class="fa-brands fa-microsoft text-blue-400 group-hover:text-blue-300"></i>
+                    <span>登入微軟帳號</span>
+                </button>
+
+                <!-- User Profile & Actions (Hidden initially) -->
+                <div id="userInfo" class="hidden flex items-center gap-5">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
+                            <i class="fa-solid fa-user text-sm"></i>
+                        </div>
+                        <span id="userName" class="text-sm font-medium text-slate-200">User</span>
+                    </div>
+                    <div class="w-px h-5 bg-white/10"></div>
+                    <button id="refreshBtn" class="text-slate-400 hover:text-white transition-colors flex items-center justify-center w-8 h-8 rounded-md hover:bg-white/10" title="重新整理同步">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+                    <button id="logoutBtn" class="text-sm text-red-400 hover:text-red-300 px-3 py-1.5 rounded-md hover:bg-red-400/10 transition-colors">登出</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 relative overflow-hidden">
+            <!-- Board Container (Lists injected here) -->
+            <div id="boardContainer" class="flex gap-6 h-full items-start overflow-x-auto overflow-y-hidden p-6 pb-4 hidden scroll-smooth snap-x">
+                <!-- Javascript will inject list columns here -->
+            </div>
+            
+            <!-- Loading Overlay -->
+            <div id="loadingState" class="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center text-slate-300 hidden z-50">
+                <div class="relative w-16 h-16 mb-4">
+                    <div class="absolute inset-0 border-4 border-slate-700 rounded-full"></div>
+                    <div class="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+                </div>
+                <p id="loadingText" class="text-lg font-medium tracking-wide">正在從 OneDrive 讀取並解析資料...</p>
+            </div>
+
+            <!-- Welcome State -->
+            <div id="welcomeState" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 z-10 transition-opacity duration-300">
+                <div class="w-24 h-24 bg-white/5 rounded-2xl flex items-center justify-center mb-8 border border-white/10 shadow-xl">
+                    <i class="fa-brands fa-microsoft text-5xl text-blue-400"></i>
+                </div>
+                <h2 class="text-3xl font-bold text-white mb-4 tracking-tight">連接您的第一張雲端看板</h2>
+                <p class="max-w-md text-center text-slate-400 text-lg leading-relaxed">
+                    安全、即時、無伺服器。透過點擊右上角的登入按鈕，授權應用程式解析您 OneDrive 內的 Markdown 任務。
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Card Detail Modal -->
+    <div id="cardDetailModal" class="hidden absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-3xl max-h-full flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="px-6 py-4 border-b border-slate-700 flex items-start justify-between bg-slate-800 shrink-0">
+                <div class="flex items-center gap-3 pr-4 min-w-0">
+                    <i class="fa-solid fa-file-lines text-blue-400 text-xl font-bold mt-1 drop-shadow-lg"></i>
+                    <h2 id="modalTitle" class="text-xl font-bold text-white break-words"></h2>
+                </div>
+                <button id="modalCloseBtn" class="text-slate-400 hover:text-white transition-colors bg-slate-700/50 hover:bg-slate-600 w-8 h-8 rounded-md flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <!-- Content Body -->
+            <div class="flex flex-col md:flex-row flex-1 overflow-y-auto custom-scrollbar">
+                <!-- Main Content (Left) -->
+                <div class="flex-1 p-6 space-y-6">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-align-left text-slate-500"></i> 說明詳細內容
+                            </div>
+                            <button id="modalEditDescriptionBtn" class="bg-slate-700/50 hover:bg-blue-500/30 text-slate-400 hover:text-white border border-slate-600/50 hover:border-blue-500/30 px-2 py-1 rounded text-xs transition-colors shadow-sm hidden" onclick="toggleDescriptionEdit(true)" title="編輯說明">編輯</button>
+                        </h3>
+                        <div id="modalDescription" class="text-slate-300 text-[14px] leading-relaxed max-w-none bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 whitespace-pre-wrap font-sans custom-scrollbar overflow-x-hidden break-words min-h-[50px]">
+                        </div>
+                        
+                        <!-- Added Edit Form -->
+                        <div id="modalDescriptionEditor" class="hidden flex-col gap-2 relative mt-2">
+                            <textarea id="modalDescriptionTextarea" class="w-full bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-xl p-3 text-sm text-white outline-none min-h-[150px] resize-y placeholder:text-slate-600 custom-scrollbar" placeholder="新增更詳細的說明..."></textarea>
+                            <div class="flex justify-end gap-2 mt-1">
+                                <button class="text-slate-400 hover:text-white text-xs px-4 py-1.5 rounded transition-colors" onclick="toggleDescriptionEdit(false)">取消</button>
+                                <button class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-1.5 rounded font-medium transition-colors shadow-sm flex items-center gap-2" onclick="saveDescriptionEdit()">
+                                    <span>儲存</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="modalAttachmentsContainer" class="mt-8 hidden">
+                        <div class="flex items-center justify-between mb-3 border-b border-slate-700/50 pb-2">
+                            <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-paperclip text-slate-500"></i> 附件 (Attachments)
+                            </h3>
+                        </div>
+                        <div id="modalAttachmentsList" class="flex flex-col gap-2">
+                            <!-- JS injects attachments here -->
+                        </div>
+                    </div>
+                    
+                    <div id="modalChecklistsContainer" class="mt-8">
+                        <div class="flex items-center justify-between mb-3 border-b border-slate-700/50 pb-2">
+                            <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-list-check text-slate-500"></i> 待辦清單
+                            </h3>
+                        </div>
+                        <div id="modalChecklists" class="flex flex-col gap-6">
+                            <!-- JS injects checklist groups here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Sidebar (Right) -->
+                <div class="w-full md:w-64 bg-slate-800/80 border-l border-slate-700/50 p-6 flex flex-col gap-6 shrink-0 shadow-inner">
+                    <!-- Labels -->
+                    <div class="relative">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">標籤 (Labels)</h3>
+                            <button id="modalAddLabelBtn" class="bg-slate-700/50 hover:bg-blue-500/30 text-slate-400 hover:text-blue-300 border border-slate-600/50 hover:border-blue-500/30 w-6 h-6 rounded flex items-center justify-center text-xs transition-colors shadow-sm" title="選擇標籤"><i class="fa-solid fa-plus"></i></button>
+                        </div>
+                        <div id="modalLabels" class="flex flex-wrap gap-2 mb-2"></div>
+                        
+                        <!-- Popover Dropdown -->
+                        <div id="labelSelectorPopover" class="hidden absolute top-8 left-0 right-0 bg-slate-800 border border-slate-600 shadow-2xl rounded-lg p-2 z-50 flex flex-col max-h-64 overflow-hidden">
+                            <input type="text" id="popoverLabelInput" class="bg-slate-900 border border-slate-700 focus:border-blue-500 rounded px-2 py-1.5 text-xs text-white w-full outline-none transition-colors mb-2 shrink-0 placeholder:text-slate-500" placeholder="搜尋或建立新標籤... (Enter)">
+                            <div id="popoverLabelList" class="flex flex-col gap-1 overflow-y-auto custom-scrollbar flex-1 pr-1">
+                                <!-- JS will inject predefined labels here -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Assignees -->
+                    <div class="relative">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">負責人 (Assignees)</h3>
+                            <button id="modalAddAssigneeBtn" class="bg-slate-700/50 hover:bg-blue-500/30 text-slate-400 hover:text-blue-300 border border-slate-600/50 hover:border-blue-500/30 w-6 h-6 rounded flex items-center justify-center text-xs transition-colors shadow-sm" title="選擇負責人"><i class="fa-solid fa-plus"></i></button>
+                        </div>
+                        <div id="modalAssignees" class="flex flex-col gap-2"></div>
+
+                        <!-- Assignee Popover Dropdown -->
+                        <div id="assigneeSelectorPopover" class="hidden absolute top-8 left-0 right-0 bg-slate-800 border border-slate-600 shadow-2xl rounded-lg p-2 z-50 flex flex-col max-h-64 overflow-hidden">
+                            <input type="text" id="popoverAssigneeInput" class="bg-slate-900 border border-slate-700 focus:border-blue-500 rounded px-2 py-1.5 text-xs text-white w-full outline-none transition-colors mb-2 shrink-0 placeholder:text-slate-500" placeholder="搜尋或新增負責人... (Enter)">
+                            <div id="popoverAssigneeList" class="flex flex-col gap-1 overflow-y-auto custom-scrollbar flex-1 pr-1">
+                                <!-- JS will inject predefined assignees here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Attachments Button -->
+                    <div class="relative pb-6 border-b border-slate-700/50 mb-2">
+                        <button class="w-full bg-slate-700/50 hover:bg-slate-600 border border-slate-600/50 hover:border-slate-500 py-2 rounded text-sm text-slate-300 font-medium transition-colors shadow-sm flex items-center justify-center gap-2" onclick="document.getElementById('modalAttachmentInput').click()">
+                            <i class="fa-solid fa-paperclip text-slate-400"></i> 加入附件
+                        </button>
+                        <input type="file" id="modalAttachmentInput" class="hidden" multiple>
+                    </div>
+
+                    <!-- Dates -->
+                    <div id="modalDatesContainer">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 border-t border-slate-700 pt-4">日期期間 (Dates)</h3>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-slate-500 text-xs w-10 text-right">起始</span>
+                                <input type="text" id="modalStartDateInput" class="bg-slate-900 border border-slate-700 focus:border-blue-500 rounded px-2 py-1 text-sm text-white w-full outline-none transition-colors" placeholder="請選擇起始日..." title="起始日">
+                                <button onclick="clearDate('StartDate')" class="text-slate-500 hover:text-red-400 transition-colors w-6 h-6 flex items-center justify-center shrink-0 rounded hover:bg-slate-800" title="移除起始日"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-slate-500 text-xs w-10 text-right">到期</span>
+                                <input type="text" id="modalDueDateInput" class="bg-slate-900 border border-slate-700 focus:border-blue-500 rounded px-2 py-1 text-sm text-white w-full outline-none transition-colors" placeholder="請選擇到期日..." title="到期日">
+                                <button onclick="clearDate('DueDate')" class="text-slate-500 hover:text-red-400 transition-colors w-6 h-6 flex items-center justify-center shrink-0 rounded hover:bg-slate-800" title="移除到期日"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script src="app.js"></script>
+</body>
+</html>
