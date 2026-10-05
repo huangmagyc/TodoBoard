@@ -216,7 +216,8 @@ async function loadBoardData() {
         const listsData = await fetchGraph(`/root${ONEDRIVE_BASE_PATH}/children`);
 
         let listsHtml = '';
-        let folders = (listsData.value || []).filter(item => item.folder);
+        // 以 _ 開頭的資料夾為系統用途 (如 _Deleted)，不視為清單
+        let folders = (listsData.value || []).filter(item => item.folder && !item.name.startsWith('_'));
 
         // 依 CardOrder 排序清單欄位
         if (boardSettings.CardOrder.length > 0) {
@@ -260,6 +261,22 @@ async function loadBoardData() {
                 </div>
             `;
         });
+
+        // 最右側的「新增清單」欄位
+        listsHtml += `
+            <div class="add-list-column w-[350px] shrink-0 snap-center">
+                <div id="addListBtn" class="w-full py-3 px-4 rounded-xl flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/5 text-slate-300 hover:text-white transition-colors text-sm font-medium cursor-pointer select-none" onclick="toggleAddListInput(true)">
+                    <i class="fa-solid fa-plus"></i> 新增清單
+                </div>
+                <div id="addListForm" class="hidden flex-col gap-2 bg-slate-800/80 backdrop-blur p-3 rounded-xl border border-slate-700">
+                    <input type="text" id="addListInput" class="bg-slate-900 border border-slate-700 focus:border-blue-500 rounded px-2.5 py-1.5 text-sm text-white outline-none w-full placeholder:text-slate-500" placeholder="輸入清單名稱...">
+                    <div class="flex items-center gap-2 justify-end">
+                        <button class="text-slate-400 hover:text-white text-xs px-3 py-1.5 rounded transition-colors" onclick="toggleAddListInput(false)">取消</button>
+                        <button id="addListSubmitBtn" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-1.5 rounded font-medium transition-colors shadow-sm" onclick="submitNewList()">新增</button>
+                    </div>
+                </div>
+            </div>
+        `;
         ui.boardContainer.innerHTML = listsHtml;
 
         // 2. 對於每個 Folder, 非同步獲取其底下的 .md 檔案 (Cards)
@@ -1412,14 +1429,15 @@ function initSortable() {
     // B. Group & C. Items 拖曳已移除此看板層級
 }
 
-// 儲存清單欄位排列順序到 Settings.md
-async function saveListOrder() {
-    const listElems = ui.boardContainer.querySelectorAll('.list-column');
-    const order = [];
-    listElems.forEach(el => {
-        const name = el.getAttribute('data-list-name');
-        if (name) order.push(name);
-    });
+// 儲存清單欄位排列順序到 Settings.md (未指定 order 時依畫面上的欄位順序)
+async function saveListOrder(order) {
+    if (!order) {
+        order = [];
+        ui.boardContainer.querySelectorAll('.list-column').forEach(el => {
+            const name = el.getAttribute('data-list-name');
+            if (name) order.push(name);
+        });
+    }
     boardSettings.CardOrder = order;
 
     try {
@@ -1479,6 +1497,55 @@ async function moveCardInOneDrive(fileId, targetFolderId) {
         loadBoardData();
     }
 }
+
+// 取得 (不存在則建立) parentId 底下名為 name 的資料夾，回傳資料夾 id
+async function ensureFolder(parentId, name) {
+    try {
+        const existing = await fetchGraph(`/items/${parentId}:/${encodeURIComponent(name)}`);
+        if (existing && existing.id) return existing.id;
+    } catch (err) {
+        if (!err.message.includes('404')) throw err;
+    }
+    const created = await fetchGraph(`/items/${parentId}/children`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, folder: {}, "@microsoft.graph.conflictBehavior": "fail" })
+    });
+    return created.id;
+}
+
+// 刪除卡片：不直接刪除 .md，而是移至 TodoList/_Deleted/{原清單名稱}/ (同名時自動改名)
+window.deleteCurrentCard = async function () {
+    if (!currentCardFileId) return;
+    const fileId = currentCardFileId;
+    const cardObj = cardsStateMap.get(fileId);
+    const cardElem = document.querySelector(`.card[data-file-id="${fileId}"]`);
+    const listElem = cardElem ? cardElem.closest('.list-column') : null;
+    const listName = listElem ? listElem.getAttribute('data-list-name') : '未分類';
+    const title = cardObj ? cardObj.title : '';
+
+    if (!confirm(`確定要刪除卡片「${title}」嗎？\n（檔案會移至 _Deleted/${listName} 資料夾保存，不會真正刪除）`)) return;
+
+    try {
+        const root = await fetchGraph(`/root${ONEDRIVE_BASE_PATH}`);
+        const deletedRootId = await ensureFolder(root.id, '_Deleted');
+        const targetFolderId = await ensureFolder(deletedRootId, listName);
+
+        await fetchGraph(`/items/${fileId}?@microsoft.graph.conflictBehavior=rename`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parentReference: { id: targetFolderId } })
+        });
+
+        cardsStateMap.delete(fileId);
+        if (cardElem) cardElem.remove();
+        if (ui.modalCloseBtn) ui.modalCloseBtn.click();
+        currentCardFileId = null;
+    } catch (err) {
+        console.error("刪除卡片失敗", err);
+        alert("刪除卡片失敗，請確認網路連線與 OneDrive 權限！");
+    }
+};
 
 
 // ==========================================
@@ -2094,6 +2161,86 @@ window.submitNewCard = async function(folderId) {
         console.error("Failed to create card", err);
         alert("新增卡片時發生錯誤，請確認網路連線與 OneDrive 權限！");
     } finally {
+        input.disabled = false;
+        submitBtn.disabled = false;
+        submitBtn.innerText = '新增';
+    }
+};
+
+// ==========================================
+// 9. ADD NEW LIST CAPABILITIES
+// ==========================================
+window.toggleAddListInput = function (show) {
+    const btn = document.getElementById('addListBtn');
+    const form = document.getElementById('addListForm');
+    const input = document.getElementById('addListInput');
+
+    if (show) {
+        btn.classList.add('hidden');
+        form.classList.remove('hidden');
+        form.classList.add('flex');
+        input.focus();
+
+        if (!input.dataset.hasKeyHandler) {
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    submitNewList();
+                } else if (e.key === 'Escape') {
+                    toggleAddListInput(false);
+                }
+            });
+            input.dataset.hasKeyHandler = 'true';
+        }
+    } else {
+        btn.classList.remove('hidden');
+        form.classList.add('hidden');
+        form.classList.remove('flex');
+        input.value = '';
+    }
+};
+
+// 新增清單：在 TodoList 根目錄建立資料夾，並加到 CardOrder 最後
+window.submitNewList = async function () {
+    const input = document.getElementById('addListInput');
+    const submitBtn = document.getElementById('addListSubmitBtn');
+    const name = input.value.trim();
+    if (!name) return;
+
+    if (/[\\/:*?"<>|#%]/.test(name) || name.startsWith('_') || name.startsWith('.')) {
+        alert('清單名稱不可包含 \\ / : * ? " < > | # % 等字元，也不可以 _ 或 . 開頭。');
+        return;
+    }
+
+    const currentOrder = [];
+    ui.boardContainer.querySelectorAll('.list-column').forEach(el => {
+        const n = el.getAttribute('data-list-name');
+        if (n) currentOrder.push(n);
+    });
+    if (currentOrder.includes(name)) {
+        alert(`清單「${name}」已存在！`);
+        return;
+    }
+
+    input.disabled = true;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
+
+    try {
+        await fetchGraph(`/root${ONEDRIVE_BASE_PATH}/children`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, folder: {}, "@microsoft.graph.conflictBehavior": "fail" })
+        });
+        await saveListOrder([...currentOrder, name]);
+        await loadBoardData();
+    } catch (err) {
+        console.error("Failed to create list", err);
+        if (err.message.includes('409')) {
+            alert(`OneDrive 中已有名為「${name}」的資料夾！`);
+        } else {
+            alert("新增清單時發生錯誤，請確認網路連線與 OneDrive 權限！");
+        }
         input.disabled = false;
         submitBtn.disabled = false;
         submitBtn.innerText = '新增';
